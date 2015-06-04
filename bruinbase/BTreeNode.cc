@@ -52,7 +52,7 @@ int BTLeafNode::getKeyCount(){
  */
 RC BTLeafNode::insert(int key, const RecordId& rid){
 	if(getKeyCount()>=Capacity){
-		cout<<"Can't insert into BTLeafNode, the node is full!"<<endl;
+		// cout<<"Can't insert into BTLeafNode, the node is full!"<<endl;
 		return -1;// the node is full
 	}
 	int insertId;
@@ -199,7 +199,7 @@ BTNonLeafNode::BTNonLeafNode(){
 void BTNonLeafNode::showEntries() {
     int nKeys = getKeyCount();
     int i = 0;
-    for (ElementNonLeaf* e = (ElementNonLeaf*)(buffer+sizeof(PageId)); i < nKeys + 1; ++e, ++i) {
+    for (ElementNonLeaf* e = (ElementNonLeaf*)(buffer); i < nKeys + 1; ++e, ++i) {
         printf("entry #%i: {key: %i, pid: %i}\n", i, e->key, e->pid);
     }
 }
@@ -211,12 +211,12 @@ void BTNonLeafNode::showEntriesWithFirstPageId(){
 }
 
 
-/*
- * Read the content of the node from the page pid in the PageFile pf.
- * @param pid[IN] the PageId to read
- * @param pf[IN] PageFile to read from
- * @return 0 if successful. Return an error code if there is an error.
- */
+// /*
+//  * Read the content of the node from the page pid in the PageFile pf.
+//  * @param pid[IN] the PageId to read
+//  * @param pf[IN] PageFile to read from
+//  * @return 0 if successful. Return an error code if there is an error.
+//  */
 RC BTNonLeafNode::read(PageId pid, const PageFile& pf){
 	RC rc;
 	rc = pf.read(pid,buffer);
@@ -241,7 +241,7 @@ RC BTNonLeafNode::write(PageId pid, PageFile& pf){
  */
 int BTNonLeafNode::getKeyCount(){
 	int count = 0;
-	ElementNonLeaf* element = (ElementNonLeaf*) (buffer+sizeof(PageId));
+	ElementNonLeaf* element = (ElementNonLeaf*) (buffer);
 	while(count<Capacity && element->key!=0){
 		count++;
 		element++;
@@ -249,17 +249,17 @@ int BTNonLeafNode::getKeyCount(){
 	return count;
 }
 
-
 /*
  * Insert a (key, pid) pair to the node.
  * @param key[IN] the key to insert
  * @param pid[IN] the PageId to insert
  * @return 0 if successful. Return an error code if the node is full.
  */
+
 RC BTNonLeafNode::insert(int key, PageId pid){
 	if(getKeyCount()>=Capacity)
 		return -1;
-	ElementNonLeaf* element = (ElementNonLeaf*) (buffer+sizeof(PageId));
+	ElementNonLeaf* element = (ElementNonLeaf*) (buffer);
 	int index=0;
 	for(; index<getKeyCount();index++){
 		if(element[index].key == key){
@@ -271,13 +271,14 @@ RC BTNonLeafNode::insert(int key, PageId pid){
 		}
 	}
 	for(int i=getKeyCount();i>index;i--){
-		ElementNonLeaf* entry = (ElementNonLeaf*) (buffer+sizeof(PageId)) + i;
+		ElementNonLeaf* entry = (ElementNonLeaf*) (buffer) + i;
 		*entry = *(entry-1); 
 	}
 	element[index].key = key;
 	element[index].pid = pid;
 	return 0;
 }
+
 
 /*
  * Insert the (key, pid) pair to the node
@@ -289,11 +290,13 @@ RC BTNonLeafNode::insert(int key, PageId pid){
  * @param midKey[OUT] the key in the middle after the split. This key should be inserted to the parent node.
  * @return 0 if successful. Return an error code if there is an error.
  */
+
+
 RC BTNonLeafNode::insertAndSplit(int key, PageId pid, BTNonLeafNode& sibling, int& midKey){
 	//same as above except for size check
-	ElementNonLeaf* element = (ElementNonLeaf*) (buffer+sizeof(PageId));
-	int index;
-	for(index=0; index<getKeyCount();index++){
+	ElementNonLeaf* element = (ElementNonLeaf*) (buffer);
+	int index=0;
+	for(; index<getKeyCount();index++){
 		if(element[index].key == key){
 			cout<<"Warning! inserting duplicate value in BTNonLeafNode!"<<endl;
 			return -1;
@@ -303,7 +306,7 @@ RC BTNonLeafNode::insertAndSplit(int key, PageId pid, BTNonLeafNode& sibling, in
 		}
 	}
 	for(int i=getKeyCount();i>index;i--){
-		ElementNonLeaf* entry = (ElementNonLeaf*) (buffer+sizeof(PageId)) + i;
+		ElementNonLeaf* entry = (ElementNonLeaf*) (buffer) + i;
 		*entry = *(entry-1); 
 	}
 	element[index].key = key;
@@ -311,12 +314,12 @@ RC BTNonLeafNode::insertAndSplit(int key, PageId pid, BTNonLeafNode& sibling, in
 	//-----end of same code -----
 
 	int splitIdx = getKeyCount()/2;
-	ElementNonLeaf* splitEntry = (ElementNonLeaf*) (buffer + sizeof(PageId)) + splitIdx;
+	ElementNonLeaf* splitEntry = (ElementNonLeaf*) (buffer) + splitIdx;
 	midKey = splitEntry->key;
 	sibling.initializeRoot(splitEntry->pid, (splitEntry+1)->key, (splitEntry+1)->pid);
 	memset(splitEntry,0,sizeof(ElementNonLeaf));
 	for(int i=splitIdx+1; i<getKeyCount(); i++){
-		ElementNonLeaf* ele = (ElementNonLeaf*)(buffer+sizeof(PageId))+i;
+		ElementNonLeaf* ele = (ElementNonLeaf*)(buffer)+i;
 		sibling.insert(ele->key, ele->pid);
 		memset(ele, 0, sizeof(ElementNonLeaf));
 	}
@@ -324,22 +327,47 @@ RC BTNonLeafNode::insertAndSplit(int key, PageId pid, BTNonLeafNode& sibling, in
 }
 
 /*
- * Given the searchKey, find the child-node pointer to follow and
- * output it in pid.
+ * Given the searchKey, find the entry number and
+ * references it in eid.
  * @param searchKey[IN] the searchKey that is being looked up.
- * @param pid[OUT] the pointer to the child node to follow.
+ * @param eid[OUT] the entry number with the pointer to follow
  * @return 0 if successful. Return an error code if there is an error.
  */
-RC BTNonLeafNode::locateChildPtr(int searchKey, PageId& pid){
-	pid = Capacity-1;
-	while(pid>0){
-		ElementNonLeaf* element = (ElementNonLeaf*) buffer + pid;
+
+RC BTNonLeafNode::locateChildPtr(int searchKey, int& eid){
+	eid = getKeyCount()-1;
+	while(eid>=0){
+		ElementNonLeaf* element = (ElementNonLeaf*) buffer + eid;
 		if(element->key<searchKey)
 			return 0;
-		pid--;
+		else
+			eid--;
 	}
-	return -1;
+	return 1;
 }
+
+/*
+ * Read the (key, pid) pair from the eid entry.
+ * @param eid[IN] the entry number to read the (key, pid) pair from
+ * @param key[OUT] the key from the entry
+ * @param pid[OUT] the PageId from the entry
+ * @return 0 if successful. Return an error code if there is an error.
+ */
+
+RC BTNonLeafNode::readEntry(int eid, PageId& pid){
+	if(eid>=getKeyCount())
+		return -1;
+	if(eid<0){
+		PageId *ptr = (PageId *)(buffer+PageFile::PAGE_SIZE-sizeof(PageId));
+		pid = *ptr;	
+	}
+	else{
+		ElementNonLeaf* element = (ElementNonLeaf*) buffer + eid;
+		pid = element->pid;
+	}
+	return 0;
+}
+
 
 /*
  * Initialize the root node with (pid1, key, pid2).
@@ -350,9 +378,9 @@ RC BTNonLeafNode::locateChildPtr(int searchKey, PageId& pid){
  */
 RC BTNonLeafNode::initializeRoot(PageId pid1, int key, PageId pid2){
 	memset(buffer,0,PageFile::PAGE_SIZE);
-	PageId* ptr = (PageId*) buffer;
+	PageId* ptr = (PageId*) (buffer+PageFile::PAGE_SIZE-sizeof(PageId));
 	*ptr = pid1;
-	ElementNonLeaf* element = (ElementNonLeaf*) (buffer+sizeof(PageId));
+	ElementNonLeaf* element = (ElementNonLeaf*) buffer;
 	element->key = key;
 	element->pid = pid2;
 	return 0;

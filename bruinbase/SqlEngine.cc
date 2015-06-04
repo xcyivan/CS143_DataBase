@@ -38,12 +38,16 @@ RC SqlEngine::select(int attr, const string& table, const vector<SelCond>& cond)
 {
   RecordFile rf;   // RecordFile containing the table
   RecordId   rid;  // record cursor for table scanning
+  IndexCursor cursor;
+  BTreeIndex index;
+
 
   RC     rc;
   int    key;     
   string value;
   int    count;
   int    diff;
+  int    lookup;
 
   // open the table file
   if ((rc = rf.open(table + ".tbl", 'r')) < 0) {
@@ -51,71 +55,174 @@ RC SqlEngine::select(int attr, const string& table, const vector<SelCond>& cond)
     return rc;
   }
 
-  // scan the table file from the beginning
-  rid.pid = rid.sid = 0;
-  count = 0;
-  while (rid < rf.endRid()) {
-    // read the tuple
-    if ((rc = rf.read(rid, key, value)) < 0) {
-      fprintf(stderr, "Error: while reading a tuple from table %s\n", table.c_str());
-      goto exit_select;
-    }
+  if ((index.open(table+".idx",'r')!=0){//if the index exists
+    lookup = -1;
 
-    // check the conditions on the tuple
-    for (unsigned i = 0; i < cond.size(); i++) {
-      // compute the difference between the tuple value and the condition value
-      switch (cond[i].attr) {
-      case 1:
-	diff = key - atoi(cond[i].value);
-	break;
-      case 2:
-	diff = strcmp(value.c_str(), cond[i].value);
-	break;
+    //find a key to lookup
+    for (unsigned i = 0; i < cond.size(); i++){
+      // only consider conditions on keys
+      if (cond[i].attr != 1)
+        continue;
+
+      // Only run this algorithm on the first condition on key
+      if (cond[i].comp == SelCond::EQ){
+        lookup = i;
+        break;
       }
-
-      // skip the tuple if any condition is not met
-      switch (cond[i].comp) {
-      case SelCond::EQ:
-	if (diff != 0) goto next_tuple;
-	break;
-      case SelCond::NE:
-	if (diff == 0) goto next_tuple;
-	break;
-      case SelCond::GT:
-	if (diff <= 0) goto next_tuple;
-	break;
-      case SelCond::LT:
-	if (diff >= 0) goto next_tuple;
-	break;
-      case SelCond::GE:
-	if (diff < 0) goto next_tuple;
-	break;
-      case SelCond::LE:
-	if (diff > 0) goto next_tuple;
-	break;
+      // Determine a starting point of the range
+      // and this algorithm only applies for GT or GE condition
+      if (cond[i].comp == SelCond::GT || cond[i].comp == SelCond::GE){
+        if (lookup == -1 || atoi(cond[i].value) > atoi(cond[lookup].value))
+          lookup = i;
       }
     }
 
-    // the condition is met for the tuple. 
-    // increase matching tuple counter
-    count++;
+    
+    if (lookup > -1)//locate the target entry in BTreeIndex
+      index.locate(atoi(cond[lookup].value), cursor);
+    else// no target, just start with the first entry
+      index.locate(0,cursor);
 
-    // print the tuple 
-    switch (attr) {
-    case 1:  // SELECT key
-      fprintf(stdout, "%d\n", key);
-      break;
-    case 2:  // SELECT value
-      fprintf(stdout, "%s\n", value.c_str());
-      break;
-    case 3:  // SELECT *
-      fprintf(stdout, "%d '%s'\n", key, value.c_str());
-      break;
+    // tarversal the tree
+    count = 0;
+    while (!index.readForward(cursor, key, rid)){
+
+      if ((rc = rf.read(rid, key, value)) < 0) {
+        fprintf(stderr, "Error: while reading a tuple from table %s\n", table.c_str());
+        goto exit_select;
+      }
+
+      // Check the conditions
+      for (unsigned i = 0; i < cond.size(); i++){
+        // Compute the difference betweent the tuple and the condition
+        switch (cond[i].attr){
+          case 1:
+            diff = key - atoi(cond[i].value);
+            break;
+          case 2:
+            diff = strcmp(value.c_str(), cond[i].value);
+            break;
+        }
+
+        // Determine if condition has been met
+        switch (cond[i].comp){
+        case SelCond::EQ:
+          if (diff != 0)
+            if (cond[i].attr == 1)
+              goto finish_read;
+            else
+              continue;
+          break;
+        case SelCond::NE:
+          if (diff == 0) continue;
+          break;
+        case SelCond::GT:
+          if (diff <= 0) continue;
+          break;
+        case SelCond::LT:
+          if (diff >= 0)
+            if (cond[i].attr == 1)
+              goto finish_read;
+            else
+              continue;
+          break;
+        case SelCond::GE:
+          if (diff < 0) continue;
+          break;
+        case SelCond::LE:
+          if (diff > 0)
+            if (cond[i].attr == 1)
+              goto finish_read;
+            else
+              continue;
+          break;
+        }
+      }
+
+      //if the switch breaks and we come here, this means this entry meets the condition so we add it!
+      count++;
+
+      // print the tuple 
+      switch (attr) {
+      case 1:  // SELECT key
+        fprintf(stdout, "%d\n", key);
+        break;
+      case 2:  // SELECT value
+        fprintf(stdout, "%s\n", value.c_str());
+        break;
+      case 3:  // SELECT *
+        fprintf(stdout, "%d '%s'\n", key, value.c_str());
+        break;
+      }
     }
+  }
+  else{
+    // scan the table file from the beginning
+    rid.pid = rid.sid = 0;
+    count = 0;
+    while (rid < rf.endRid()) {
+      // read the tuple
+      if ((rc = rf.read(rid, key, value)) < 0) {
+        fprintf(stderr, "Error: while reading a tuple from table %s\n", table.c_str());
+        goto exit_select;
+      }
 
-    // move to the next tuple
-    next_tuple:
-    ++rid;
+      // check the conditions on the tuple
+      for (unsigned i = 0; i < cond.size(); i++) {
+        // compute the difference between the tuple value and the condition value
+        switch (cond[i].attr) {
+        case 1:
+  	diff = key - atoi(cond[i].value);
+  	break;
+        case 2:
+  	diff = strcmp(value.c_str(), cond[i].value);
+  	break;
+        }
+
+        // skip the tuple if any condition is not met
+        switch (cond[i].comp) {
+        case SelCond::EQ:
+  	if (diff != 0) goto next_tuple;
+  	break;
+        case SelCond::NE:
+  	if (diff == 0) goto next_tuple;
+  	break;
+        case SelCond::GT:
+  	if (diff <= 0) goto next_tuple;
+  	break;
+        case SelCond::LT:
+  	if (diff >= 0) goto next_tuple;
+  	break;
+        case SelCond::GE:
+  	if (diff < 0) goto next_tuple;
+  	break;
+        case SelCond::LE:
+  	if (diff > 0) goto next_tuple;
+  	break;
+        }
+      }
+
+      // the condition is met for the tuple. 
+      // increase matching tuple counter
+      count++;
+
+      // print the tuple 
+      switch (attr) {
+      case 1:  // SELECT key
+        fprintf(stdout, "%d\n", key);
+        break;
+      case 2:  // SELECT value
+        fprintf(stdout, "%s\n", value.c_str());
+        break;
+      case 3:  // SELECT *
+        fprintf(stdout, "%d '%s'\n", key, value.c_str());
+        break;
+      }
+
+      // move to the next tuple
+      next_tuple:
+      ++rid;
+    }
   }
 
   // print matching tuple count if "select count(*)"
@@ -147,6 +254,15 @@ RC SqlEngine::load(const string& table, const string& loadfile, bool index){
     rc = -1;
     return rc;
   }
+
+  BTreeIndex btindex;
+  if (index){
+    if(btindex.open(table+".idx",'w')){
+      cout << "Error: Could Not Access Index" << endl;
+      return 1;
+    }
+  }
+
   string line;
   while(getline(is,line)){
     int key;
@@ -160,10 +276,19 @@ RC SqlEngine::load(const string& table, const string& loadfile, bool index){
       cout<<"Error when appending line at the end of record file!"<<endl;
       return rc;
     }
+
+    if (index){
+      if(btindex.insert(key, rid)){
+        cout << "Warning: Could not insert key into index" << endl;
+        continue;
+      }
+    }
   }
   cout<<"load successfully!"<<endl;
   rf.close();
   is.close();
+  if (index)
+    btindex.close();
   rc = 0;
   return rc;
   

@@ -163,7 +163,10 @@ class BTNonLeafNode {
     * @param pid[OUT] the pointer to the child node to follow.
     * @return 0 if successful. Return an error code if there is an error.
     */
-    RC locateChildPtr(int searchKey, PageId& pid);
+    RC locateChildPtr(int searchKey, int& eid);
+
+
+    RC readEntry(int eid, PageId& pid);
 
    /**
     * Initialize the root node with (pid1, key, pid2).
@@ -196,6 +199,10 @@ class BTNonLeafNode {
     */
     RC write(PageId pid, PageFile& pf);
 
+    //added for recursive purpose in part C
+    
+    int getMaxKeyCount();
+
   private:
    /**
     * The main memory buffer for loading the content of the disk page 
@@ -205,8 +212,13 @@ class BTNonLeafNode {
     int Capacity;
 
     struct ElementNonLeaf{
-    int key;
-    PageId pid;
+        int key;
+        PageId pid;
+    };
+
+    struct Entry{
+        int key;
+        PageId pid;
     };
 }; 
 
